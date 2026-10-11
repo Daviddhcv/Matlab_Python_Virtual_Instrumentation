@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+02_procesamiento_firmware_dsp.py
+Marco de Instrumentación Virtual MATLAB-Python
+
+Descripción: Procesa los datos exportados por MATLAB emulando la capa de 
+             firmware DSP en Python. Ejecuta la reconstrucción algebraica 
+             inversa, análisis FFT y caracterización estocástica del error.
+Autores: D. H. Cárdenas-Villacrés, C. Chávez-Cordova, O. Astudillo-Astudillo
+Universidad Politécnica Salesiana - Sede Guayaquil
+"""
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.fft import fft, fftfreq
+
+def main():
+    # 1. Cargar conjunto de datos exportado por MATLAB
+    csv_file = 'dataset_simulacion_senales.csv'
+    try:
+        df = pd.read_csv(csv_file)
+        print(f"[INFO] Datos cargados exitosamente desde {csv_file}")
+    except FileNotFoundError:
+        print(f"[ERROR] No se encontró el archivo {csv_file}. Ejecute primero el script de MATLAB.")
+        return
+
+    t = df['timestamp_s'].to_numpy()
+    i_pure = df['i_pure_A'].to_numpy()
+    adc_code = df['ADC_code_12bit'].to_numpy()
+
+    # 2. Parámetros del Sistema de Adquisición
+    Vcc = 3.3             # Voltaje de alimentación [V]
+    S = 0.045             # Sensibilidad estática del sensor [V/A]
+    B = 12                # Resolución ADC
+    N_levels = (2**B) - 1 # 4095 niveles
+    fs = 10000            # Frecuencia de muestreo [Hz]
+    N = len(t)
+
+    # 3. Algoritmo de Mapeo Inverso y Reconstrucción de la Corriente
+    V_rec = (adc_code / N_levels) * Vcc
+    i_rec = (V_rec - (Vcc / 2.0)) / S
+
+    # Vector de Error Residual
+    e_t = i_pure - i_rec
+
+    # 4. Cálculo de Métricas Metrológicas
+    rmse = np.sqrt(np.mean(e_t**2))
+    mae = np.mean(np.abs(e_t))
+    bias = np.mean(e_t)
+    max_error = np.max(np.abs(e_t))
+
+    print("\n=======================================================")
+    print("      METRICAS DE EVALUACION METROLOGICA EN PYTHON    ")
+    print("=======================================================")
+    print(f"RMSE (Root Mean Square Error) : {rmse:.4f} A")
+    print(f"MAE (Mean Absolute Error)     : {mae:.4f} A")
+    print(f"Sesgo Sistémico (Bias)        : {bias:.6f} A")
+    print(f"Error Máximo Absoluto         : {max_error:.4f} A")
+    print("=======================================================\n")
+
+    # 5. Análisis Espectral mediante Transformada Rápida de Fourier (FFT)
+    fft_vals = fft(i_rec)
+    fft_freqs = fftfreq(N, 1/fs)
+    
+    # Tomar la mitad positiva del espectro
+    pos_mask = fft_freqs >= 0
+    freqs_pos = fft_freqs[pos_mask]
+    fft_mag = (2.0 / N) * np.abs(fft_vals[pos_mask])
+
+    # 6. Generación de Gráficas de Validación
+    plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
+    
+    fig, axs = plt.subplots(2, 2, figsize=(12, 8))
+
+    # Gráfica Temporal
+    axs[0, 0].plot(t, i_pure, label='Teórica Pura', color='blue', linewidth=1.5)
+    axs[0, 0].plot(t, i_rec, label='Reconstruida DSP', color='red', linestyle='--', alpha=0.8)
+    axs[0, 0].set_title('Reconstrucción Temporal de Corriente')
+    axs[0, 0].set_xlabel('Time [s]')
+    axs[0, 0].set_ylabel('Current [A]')
+    axs[0, 0].legend()
+
+    # Gráfica Espectral FFT
+    axs[0, 1].stem(freqs_pos[:100], fft_mag[:100], linefmt='b-', markerfmt='bo', basefmt='r-')
+    axs[0, 1].set_title('Espectro de Magnitud FFT')
+    axs[0, 1].set_xlabel('Frequency [Hz]')
+    axs[0, 1].set_ylabel('Magnitude [A]')
+    axs[0, 1].set_xlim([0, 500])
+
+    # Evolución del Error Residual
+    axs[1, 0].plot(t, e_t, color='purple', linewidth=0.8)
+    axs[1, 0].set_title('Evolución del Error Residual e(t)')
+    axs[1, 0].set_xlabel('Time [s]')
+    axs[1, 0].set_ylabel('Error [A]')
+
+    # Histograma del Error y Ajuste Gaussiano
+    axs[1, 1].hist(e_t, bins=30, density=True, alpha=0.6, color='g', edgecolor='black')
+    axs[1, 1].set_title('Distribución Estadística del Error')
+    axs[1, 1].set_xlabel('Error [A]')
+    axs[1, 1].set_ylabel('Density')
+
+    plt.tight_layout()
+    plt.savefig('resultado_reconstruccion_metrologica.png', dpi=300)
+    print("[INFO] Gráfica guardada como 'resultado_reconstruccion_metrologica.png'")
+    plt.show()
+
+if __name__ == '__main__':
+    main()
